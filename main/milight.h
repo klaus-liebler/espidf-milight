@@ -22,43 +22,7 @@ constexpr char rf24_datarates[][8] = {"1MBPS", "2MBPS", "250KBPS"};
 constexpr char rf24_crclength[][10] = {"Disabled", "8 bits", "16 bits"};
 constexpr char rf24_pa_dbm[][8] = {"PA_MIN", "PA_LOW", "PA_HIGH", "PA_MAX"};
 
-/**
- * Power Amplifier level.
- *
- * For use with setPALevel()
- */
-enum class rf24_pa_dbm_e
-{
-	RF24_PA_MIN = 0,
-	RF24_PA_LOW = 1,
-	RF24_PA_HIGH = 2,
-	RF24_PA_MAX = 3,
-	RF24_PA_ERROR
-};
 
-/**
- * Data rate.  How fast data moves through the air.
- *
- * For use with setDataRate()
- */
-enum class rf24_datarate_e
-{
-	RF24_1MBPS = 0,
-	RF24_2MBPS = 1,
-	RF24_250KBPS = 2,
-};
-
-/**
- * CRC Length.  How big (if any) of a CRC is included.
- *
- * For use with setCRCLength()
- */
-enum class rf24_crclength_e
-{
-	RF24_CRC_DISABLED = 0,
-	RF24_CRC_8,
-	RF24_CRC_16
-};
 
 
 class Nrf24Receiver
@@ -124,8 +88,8 @@ public:
 		spi_bus_config.sclk_io_num = sclk_pin;
 		spi_bus_config.mosi_io_num = mosi_pin;
 		spi_bus_config.miso_io_num = miso_pin;
-		spi_bus_config.quadwp_io_num = -1;
-		spi_bus_config.quadhd_io_num = -1;
+		spi_bus_config.quadwp_io_num = GPIO_NUM_NC;
+		spi_bus_config.quadhd_io_num = GPIO_NUM_NC;
 
 		ESP_ERROR_CHECK(spi_bus_initialize(hostDevice, &spi_bus_config, dmaChannel));
 
@@ -141,7 +105,7 @@ public:
 
 		cePin = ce_pin;
 		_SPIHandle = handle;
-		payloadLen = 32;
+		payloadLen = 14;
 	}
 
 	void spiTransaction(uint8_t *buf, size_t len)
@@ -156,7 +120,7 @@ public:
 
 	//Set tx power : 0=-18dBm,1=-12dBm,2=-6dBm,3=0dBm,
 	//Select between the high speed data rates:0=1Mbps, 1=2Mbps, 2=250Kbps
-	void config(uint8_t channel, uint8_t payloadLen, const uint8_t *const readAddr, uint8_t readAddrLen, uint8_t en_aa, uint8_t speed, uint8_t txPower)
+	void config(uint8_t channel, uint8_t payloadLen, const uint8_t *const readAddr, uint8_t readAddrLen, uint8_t en_aa, Rf24Datarate speed, Rf24PowerAmp txPower)
 
 	// Sets the important registers in the MiRF module and powers the module
 	// in receiving mode
@@ -172,17 +136,17 @@ public:
 		Nrf24_configRegister(EN_RXADDR, val);
 		Nrf24_ceHi();
 
-		if (speed > 1)
+		if ((int)speed > 1)
 		{
 			Nrf24_configRegister(RF_SETUP, (1 << RF_DR_LOW));
 		}
 		else
 		{
-			Nrf24_configRegister(RF_SETUP, (speed << RF_DR_HIGH));
+			Nrf24_configRegister(RF_SETUP, (((int)speed) << RF_DR_HIGH));
 		}
 
 		Nrf24_configRegister(EN_AA, en_aa);
-		Nrf24_configRegister(RF_SETUP, (txPower << RF_PWR));
+		Nrf24_configRegister(RF_SETUP, ((int)txPower) << RF_PWR);
 		Nrf24_configRegister(RF_CH, channel);		// Set RF channel
 		Nrf24_configRegister(RX_PW_P0, payloadLen); // Set length of incoming payload
 		Nrf24_configRegister(RX_PW_P1, payloadLen);
@@ -317,9 +281,9 @@ First returned byte is status. data buffer must have a length of min PAYLOAD_LEN
 		printf("\r\n");
 	}
 
-	rf24_datarate_e Nrf24_getDataRate()
+	Rf24Datarate Nrf24_getDataRate()
 	{
-		rf24_datarate_e result;
+		Rf24Datarate result;
 		uint8_t dr = readRegister(RF_SETUP);
 		dr = dr & (_BV(RF_DR_LOW) | _BV(RF_DR_HIGH));
 
@@ -328,17 +292,17 @@ First returned byte is status. data buffer must have a length of min PAYLOAD_LEN
 		if (dr == _BV(RF_DR_LOW))
 		{
 			// '10' = 250KBPS
-			result = rf24_datarate_e::RF24_250KBPS;
+			result = Rf24Datarate::RF24_250KBPS;
 		}
 		else if (dr == _BV(RF_DR_HIGH))
 		{
 			// '01' = 2MBPS
-			result = rf24_datarate_e::RF24_2MBPS;
+			result = Rf24Datarate::RF24_2MBPS;
 		}
 		else
 		{
 			// '00' = 1MBPS
-			result = rf24_datarate_e::RF24_1MBPS;
+			result = Rf24Datarate::RF24_1MBPS;
 		}
 		return result;
 	}
@@ -436,7 +400,7 @@ private:
 		return state;
 	}
 
-	const uint8_t rev[16]{0, 8, 4, 0xC, 2, 0xA, 6, 0xE, 1, 9, 5, 0xD, 3, 0xB, 7, 0xF};
+	
 
 	uint8_t getByte(uint8_t *src, size_t i)
 	{ //i=0 meint:length
@@ -484,7 +448,7 @@ public:
 	{
 	}
 
-	bool NewPacket(uint8_t *cmd, uint8_t *arg)
+	bool TryReceiveNewPacket(uint8_t *cmd, uint8_t *arg)
 	{
 		if (!recv->IsDataReady())
 			return false;
